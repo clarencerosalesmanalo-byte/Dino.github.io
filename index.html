@@ -39,7 +39,8 @@
   }
   .small{font-size:12px;color:#666;margin-top:6px}
 
-  #gameOverVideo {
+  /* 🔹 Video popup styling */
+  #videoContainer {
     display: none;
     position: fixed;
     top: 50%;
@@ -51,6 +52,14 @@
     border: 3px solid white;
     box-shadow: 0 0 25px rgba(0,0,0,0.6);
     border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+  }
+  #gameOverVideo {
+    width: 100%;
+    display: block;
+    /* Disable controls to prevent pausing */
+    pointer-events: none;
   }
   #overlay {
     display: none;
@@ -59,6 +68,30 @@
     width: 100%; height: 100%;
     background: rgba(0,0,0,0.6);
     z-index: 9;
+  }
+  /* 🔹 Skip button styling */
+  #skipBtn {
+    position: absolute;
+    bottom: 20px;
+    right: 20px;
+    padding: 12px 24px;
+    background: rgba(255,255,255,0.9);
+    color: #222;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    z-index: 11;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial;
+  }
+  #skipBtn:hover {
+    background: #fff;
+    transform: scale(1.05);
+  }
+  #skipBtn:active {
+    transform: scale(0.95);
   }
 </style>
 </head>
@@ -71,17 +104,23 @@
   <canvas id="c" width="900" height="300"></canvas>
 </div>
 
+<!-- 🔹 Overlay + Video Container (appears when game over) -->
 <div id="overlay"></div>
-<video id="gameOverVideo" controls>
-  <source src="sad.mp4" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
+<div id="videoContainer">
+  <video id="gameOverVideo" autoplay playsinline>
+    <source src="sad.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
+  <button id="skipBtn">Skip →</button>
+</div>
 
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const overlay = document.getElementById('overlay');
+const videoContainer = document.getElementById('videoContainer');
 const gameOverVideo = document.getElementById('gameOverVideo');
+const skipBtn = document.getElementById('skipBtn');
 
 let W = canvas.width, H = canvas.height;
 let running = false, gameOver = false;
@@ -95,9 +134,6 @@ let particles = [];
 let score = 0, highscore = 0;
 let daytime = true;
 let tick = 0;
-
-// Track how many times the player has died
-let deathCount = 0;
 
 try{ highscore = Number(localStorage.getItem('dino_high')||0); }catch(e){ highscore = 0; }
 
@@ -152,9 +188,9 @@ function reset(){
   dino.y = H-60; dino.vy = 0; dino.grounded = true; dino.ducking = false;
   daytime = true; tick = 0;
 
-  // Hide video popup when restarting
+  // 🔹 Hide video popup when restarting
   overlay.style.display = 'none';
-  gameOverVideo.style.display = 'none';
+  videoContainer.style.display = 'none';
   gameOverVideo.pause();
   gameOverVideo.currentTime = 0;
 }
@@ -168,21 +204,30 @@ function start(){
 }
 
 function jump(){
-  if(gameOver) {
-    // Player is retrying — increment death count
-    // If they've already died once before, show the video BEFORE resetting
-    // (deathCount was incremented at death time, so >= 2 means they've died & retried)
-    reset();
-    running = true;
-    gameOver = false;
-    return;
-  }
+  if(gameOver) { reset(); running = true; gameOver = false; return; }
   if(dino.grounded){
     dino.vy = -dino.jumpPower;
     dino.grounded = false;
     beep(1000,0.03);
   }
 }
+
+// 🔹 Skip button functionality - return to game over screen
+skipBtn.addEventListener('click', () => {
+  overlay.style.display = 'none';
+  videoContainer.style.display = 'none';
+  gameOverVideo.pause();
+  gameOverVideo.currentTime = 0;
+  drawGameOver();
+});
+
+// 🔹 Also allow space/up to skip video
+window.addEventListener('keydown', (e) => {
+  if ((e.key === ' ' || e.key === 'ArrowUp') && videoContainer.style.display === 'block') {
+    e.preventDefault();
+    skipBtn.click();
+  }
+});
 
 let last = performance.now();
 function loop(now){
@@ -246,14 +291,21 @@ function loop(now){
         running = false;
         beep(150, 0.12);
 
-        // Increment death counter on each death
-        deathCount++;
-
-        // Only show the video popup on the SECOND death (i.e., after a retry)
-        if(deathCount >= 2){
-          overlay.style.display = 'block';
-          gameOverVideo.style.display = 'block';
-          gameOverVideo.play();
+        // 🔹 Show and play video when the player dies (autoplays with sound)
+        overlay.style.display = 'block';
+        videoContainer.style.display = 'block';
+        
+        // Ensure video plays with sound
+        gameOverVideo.muted = false;
+        const playPromise = gameOverVideo.play();
+        if (playPromise !== undefined) {
+          playPromise.catch(error => {
+            // Auto-play was prevented, try muted first then unmute
+            gameOverVideo.muted = true;
+            gameOverVideo.play().then(() => {
+              gameOverVideo.muted = false;
+            });
+          });
         }
 
         break;
@@ -263,7 +315,7 @@ function loop(now){
 
   draw();
   if(running) requestAnimationFrame(loop);
-  else if(gameOver) drawGameOver();
+  else if(gameOver && videoContainer.style.display !== 'block') drawGameOver();
 }
 
 function clear(){
